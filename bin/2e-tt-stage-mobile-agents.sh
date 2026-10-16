@@ -31,6 +31,8 @@ for old in outdir.iterdir():
         old.unlink()
 
 installers = []
+screen_cores = []
+screen_version = (root / 'SCREEN_CORE_VERSION').read_text().strip()
 for platform, suffix, folder, prefix in (
     ("ubuntu", ".deb", "ubuntu", "taptether-agent_"),
     ("macos", ".tar.gz", "macos", "TapTetherAgent-macos-"),
@@ -61,6 +63,29 @@ for platform, suffix, folder, prefix in (
             "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
             "bytes": destination.stat().st_size,
         })
+# Stage independently signed Screen Core archives. The existing five-file
+# macOS agent installer format remains unchanged for older updater clients.
+for arch in ("amd64", "arm64"):
+    # Linux-only development builds can stage Ubuntu without Mac artifacts.
+    if not any(row["platform"] == "macos" and row["arch"] == arch
+               for row in installers):
+        continue
+    name = f"TapTetherScreenCore-macos-{arch}-{screen_version}.tar.gz"
+    source = root / "dist" / "macos" / name
+    if not source.is_file():
+        raise SystemExit(f"Required macOS Screen Core is missing: {source}")
+    with tarfile.open(source, "r:gz") as tf:
+        entries = {m.name: m for m in tf.getmembers()}
+        if entries.keys() != {"taptether-screen-core"}:
+            raise SystemExit(f"Invalid Screen Core archive: {source}")
+    destination = outdir / name
+    shutil.copyfile(source, destination)
+    screen_cores.append({
+        "platform": "macos", "arch": arch,
+        "filename": name, "asset": f"assets/agents/{name}",
+        "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
+        "bytes": destination.stat().st_size,
+    })
 # Bundle the exact installation helpers with the matching agents so the phone
 # can deploy to an SSH-authenticated Ubuntu desktop without another computer.
 for name, source in (
@@ -73,7 +98,7 @@ for name, source in (
         raise SystemExit(f"Required phone SSH provisioning asset missing: {source}")
     shutil.copyfile(source, outdir / name)
 
-manifest = {"version": version, "installers": installers}
+manifest = {"version": version, "installers": installers, "screenCores": screen_cores}
 (outdir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 print("Staged Flutter agent assets:")
 for row in installers:

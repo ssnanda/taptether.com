@@ -174,6 +174,36 @@ class MacSshProvisioner {
             'match the release manifest.');
       }
 
+      // Screen Core is separately signed and versioned, outside the legacy
+      // five-entry Mac updater archive. Verify on the phone before transfer.
+      final coreRows = decoded['screenCores'];
+      if (coreRows is! List) {
+        throw StateError('[MAC-SCREEN-CORE] Screen Core package is missing.');
+      }
+      final coreMatches = coreRows.whereType<Map>().where((item) =>
+          item['platform'] == 'macos' && item['arch'] == arch).toList();
+      if (coreMatches.length != 1) {
+        throw StateError('[MAC-SCREEN-CORE] Screen Core for this Mac is missing.');
+      }
+      final coreEntry = coreMatches.single;
+      final coreName = coreEntry['filename'];
+      final coreAsset = coreEntry['asset'];
+      final coreDigest = coreEntry['sha256'];
+      if (coreName is! String || coreAsset is! String ||
+          coreDigest is! String ||
+          !coreName.startsWith('TapTetherScreenCore-macos-$arch-') ||
+          !coreName.endsWith('.tar.gz') ||
+          coreAsset != 'assets/agents/$coreName' ||
+          !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(coreDigest)) {
+        throw StateError('[MAC-SCREEN-CORE] Invalid Screen Core metadata.');
+      }
+      final coreData = await rootBundle.load(coreAsset);
+      final coreArchive = coreData.buffer.asUint8List(
+          coreData.offsetInBytes, coreData.lengthInBytes);
+      if (sha256.convert(coreArchive).toString() != coreDigest.toLowerCase()) {
+        throw StateError('[MAC-SCREEN-CORE] Screen Core SHA-256 mismatch.');
+      }
+
       final make = await client.runWithResult(
           'mktemp -d /tmp/taptether-mac.XXXXXXXX');
       if (make.exitCode != 0) {
@@ -195,6 +225,16 @@ class MacSshProvisioner {
         await output.close();
       }
 
+      progress('Staging independently approved Screen Core');
+      final coreOutput = await sftp.open('$stage/$coreName',
+          mode: SftpFileOpenMode.create |
+              SftpFileOpenMode.write | SftpFileOpenMode.truncate);
+      try {
+        await coreOutput.writeBytes(coreArchive);
+      } finally {
+        await coreOutput.close();
+      }
+
       progress('Checking archive and installing user LaunchAgent');
       final cmd = '''
 set -e
@@ -205,7 +245,9 @@ for f in taptether-agent taptetherctl-mac taptether-agent-update-mac TapTether.i
 done
 test "\$(wc -l < archive-list.txt | tr -d ' ')" -eq 5 || exit 52
 tar -xzf '$filename'
-chmod 755 taptether-agent taptetherctl-mac taptether-agent-update-mac TapTetherTray
+test "\$(tar -tzf '$coreName')" = 'taptether-screen-core' || exit 52
+tar -xzf '$coreName'
+chmod 755 taptether-agent taptetherctl-mac taptether-agent-update-mac TapTetherTray taptether-screen-core
 bash taptetherctl-mac install > install.log 2>&1 || exit 53
 cat install.log
 ''';

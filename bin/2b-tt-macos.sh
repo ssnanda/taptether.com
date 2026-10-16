@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 [[ "$(uname -s)" == Darwin ]] || { echo 'macOS/Xcode required.' >&2; exit 1; }
 version="$(cat "$ROOT/VERSION")"
 core_version="$(cat "$ROOT/INPUT_CORE_VERSION")"
+screen_core_version="$(cat "$ROOT/SCREEN_CORE_VERSION")"
 signing_identity="${TAPTETHER_CODESIGN_IDENTITY:--}"
 trash_build_temp() {
   local path="$1" trash destination
@@ -29,11 +30,15 @@ for arch in amd64 arm64; do
   (cd "$ROOT/agent" && CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build -trimpath \
     -ldflags "-s -w -X main.version=$core_version" \
     -o "$temp/taptether-input-core" ./cmd/taptether-input-core)
+  (cd "$ROOT/agent" && CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" go build -trimpath \
+    -ldflags "-s -w -X main.version=$screen_core_version" \
+    -o "$temp/taptether-screen-core" ./cmd/taptether-screen-core)
   cp "$ROOT/bin/4-macos-agent-setup.sh" "$temp/taptetherctl-mac"
   cp "$ROOT/bin/8-tt-update-macos.sh" "$temp/taptether-agent-update-mac"
   cp "$ROOT/dist/branding/TapTether.icns" "$temp/TapTether.icns"
   codesign --force --sign "$signing_identity" --timestamp=none "$temp/taptether-agent"
   codesign --force --sign "$signing_identity" --timestamp=none "$temp/taptether-input-core"
+  codesign --force --sign "$signing_identity" --timestamp=none "$temp/taptether-screen-core"
   case "$arch" in
     amd64) swift_target="x86_64-apple-macos12.0" ;;
     arm64) swift_target="arm64-apple-macos12.0" ;;
@@ -41,13 +46,13 @@ for arch in amd64 arm64; do
   xcrun swiftc -O -target "$swift_target" \
     "$ROOT/desktop/macos/TapTetherTray.swift" -framework AppKit \
     -o "$temp/TapTetherTray"
-  chmod 755 "$temp/taptether-agent" "$temp/taptether-input-core" "$temp/taptetherctl-mac" \
+  chmod 755 "$temp/taptether-agent" "$temp/taptether-input-core" "$temp/taptether-screen-core" "$temp/taptetherctl-mac" \
     "$temp/taptether-agent-update-mac" "$temp/TapTetherTray"
   bundle="$temp/TapTether Agent.app"
   mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
   cp "$temp/TapTetherTray" "$bundle/Contents/MacOS/TapTetherTray"
   cp "$temp/TapTether.icns" "$temp/taptether-agent" \
-    "$temp/taptether-input-core" \
+    "$temp/taptether-input-core" "$temp/taptether-screen-core" \
     "$temp/taptetherctl-mac" "$temp/taptether-agent-update-mac" \
     "$bundle/Contents/Resources/"
   printf '%s\n' "$version" > "$bundle/Contents/Resources/version.txt"
@@ -79,6 +84,8 @@ EOF
     TapTether.icns TapTetherTray
   core_out="$ROOT/dist/macos/TapTetherInputCore-macos-$arch-$core_version.tar.gz"
   COPYFILE_DISABLE=1 tar -czf "$core_out" -C "$temp" taptether-input-core
+  screen_core_out="$ROOT/dist/macos/TapTetherScreenCore-macos-$arch-$screen_core_version.tar.gz"
+  COPYFILE_DISABLE=1 tar -czf "$screen_core_out" -C "$temp" taptether-screen-core
   # Separate Finder-friendly artifact: unzip and open the .app, no Terminal.
   app_zip="$ROOT/dist/macos/TapTetherAgent-macos-$arch-$version.zip"
   ditto -c -k --sequesterRsrc --keepParent "$bundle" "$app_zip"
@@ -87,6 +94,7 @@ EOF
   trash_build_temp "$temp"
   echo "Compatible macOS agent archive: $out"
   echo "Versioned macOS Input Core archive: $core_out"
+  echo "Versioned macOS Screen Core archive: $screen_core_out"
   echo "Double-clickable macOS app ZIP: $app_zip"
 done
 for old in "$ROOT"/dist/macos/TapTetherAgent-macos-*.tar.gz "$ROOT"/dist/macos/TapTetherAgent-macos-*.zip; do

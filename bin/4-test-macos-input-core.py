@@ -25,5 +25,27 @@ assert 'CANONICAL="$HOME/Applications/TapTether Agent.app"' in CLEANUP
 assert "find \"$ROOT/dist\" -type d -name '*.app'" in CLEANUP
 assert 'delete (POSIX file' in CLEANUP and 'rm -rf' not in CLEANUP
 assert 'bash "$ROOT/bin/4-clean-macos-review-apps.sh"' in PUBLISH
+# Stable Screen Core is an independent signed process and socket:
+# no new macOS Screen Recording prompts on normal agent binary updates.
+SCREEN = (ROOT / "agent" / "cmd" / "taptether-screen-core" / "main.go").read_text()
+SCREEN_PROXY = (ROOT / "agent" / "cmd" / "taptether-agent" / "screen_capture_darwin.go").read_text()
+SCREEN_VERSION = (ROOT / "SCREEN_CORE_VERSION").read_text().strip()
+MAC_STAGE = (ROOT / "bin" / "2e-tt-stage-mobile-agents.sh").read_text()
+MAC_SSH = (ROOT / "app" / "lib" / "macos_ssh_provisioner.dart").read_text()
+assert SCREEN_VERSION == "1.0.0"
+assert "LOCAL_PEERPID" in SCREEN and "getpeereid" in SCREEN
+assert "codesign" in SCREEN and "verifySigningPeer" in SCREEN
+assert "subtle.ConstantTimeCompare" in SCREEN
+assert "screencap.Capture()" in SCREEN
+assert "taptether-screen-core" in SCREEN_PROXY
+assert "captureScreenFrame" in (ROOT / "agent" / "cmd" / "taptether-agent" / "screen_http.go").read_text()
+assert "Preserved TapTether Screen Core" in SETUP
+assert "com.taptether.screen-core" in SETUP
+assert "upgrade-screen-core" in SETUP
+assert "taptether-screen-core" in BUILD
+assert "taptether-screen-core" not in UPDATER
+assert "screenCores" in MAC_STAGE and "screenCores" in MAC_SSH
+assert "coreArchive" in MAC_SSH and "sha256.convert(coreArchive)" in MAC_SSH
+
 print("PASS: stable Input Core preservation, explicit upgrade, migration, diagnostics,")
 print("      complete Quit, agent-only updates, and review-app cleanup invariants")

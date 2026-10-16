@@ -31,11 +31,14 @@ for ARCH in amd64 arm64; do
   MAC="$(printf '%s/dist/macos/TapTetherAgent-macos-%s-%s.tar.gz' "$ROOT" "$ARCH" "$VERSION")"
   MAC_APP="$(printf '%s/dist/macos/TapTetherAgent-macos-%s-%s.zip' "$ROOT" "$ARCH" "$VERSION")"
   CORE_VERSION="$(cat "$ROOT/INPUT_CORE_VERSION")"
+  SCREEN_CORE_VERSION="$(cat "$ROOT/SCREEN_CORE_VERSION")"
   MAC_CORE="$(printf '%s/dist/macos/TapTetherInputCore-macos-%s-%s.tar.gz' "$ROOT" "$ARCH" "$CORE_VERSION")"
   if [[ -s "$DEB" ]]; then cp "$DEB" "$STAGE/TapTetherAgent-Ubuntu-$ARCH.deb"; fi
   if [[ -s "$MAC" ]]; then cp "$MAC" "$STAGE/TapTetherAgent-macOS-$ARCH.tar.gz"; fi
   if [[ -s "$MAC_APP" ]]; then cp "$MAC_APP" "$STAGE/TapTetherAgent-macOS-$ARCH.zip"; fi
   if [[ -s "$MAC_CORE" ]]; then cp "$MAC_CORE" "$STAGE/TapTetherInputCore-macOS-$ARCH.tar.gz"; fi
+  MAC_SCREEN="$ROOT/dist/macos/TapTetherScreenCore-macos-$ARCH-$SCREEN_CORE_VERSION.tar.gz"
+  if [[ -s "$MAC_SCREEN" ]]; then cp "$MAC_SCREEN" "$STAGE/TapTetherScreenCore-macOS-$ARCH.tar.gz"; fi
   WIN="$ROOT/dist/windows/TapTetherAgent-Windows-$ARCH-$VERSION.zip"
   if [[ -s "$WIN" ]]; then cp "$WIN" "$STAGE/TapTetherAgent-Windows-$ARCH.zip"; fi
 done
@@ -47,13 +50,14 @@ else
   echo 'No current-version IPA found. Skipping altstore.json refresh.'
 fi
 # Never call this a successful release with missing or mixed-version assets.
-# All eleven files must be produced by the verified agent + mobile jobs.
+# All required files must be produced by the verified agent + mobile jobs.
 expected_assets=(
   TapTether-icon.png TapTether.ipa TapTether.apk
   TapTetherAgent-Ubuntu-amd64.deb TapTetherAgent-Ubuntu-arm64.deb
   TapTetherAgent-macOS-amd64.tar.gz TapTetherAgent-macOS-arm64.tar.gz
   TapTetherAgent-macOS-amd64.zip TapTetherAgent-macOS-arm64.zip
   TapTetherInputCore-macOS-amd64.tar.gz TapTetherInputCore-macOS-arm64.tar.gz
+  TapTetherScreenCore-macOS-amd64.tar.gz TapTetherScreenCore-macOS-arm64.tar.gz
   TapTetherAgent-Windows-amd64.zip TapTetherAgent-Windows-arm64.zip
 )
 for asset in "${expected_assets[@]}"; do

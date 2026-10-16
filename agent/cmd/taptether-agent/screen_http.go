@@ -39,7 +39,7 @@ func registerScreenEndpoints(mux *http.ServeMux, access *identityAPI) {
     mux.HandleFunc("/api/snapshot", func(w http.ResponseWriter, r *http.Request) {
         if !authorize(w, r) { return }
         screenCaptureLock.Lock()
-        frame, err := screencap.Capture()
+        frame, err := captureScreenFrame()
         screenCaptureLock.Unlock()
         if err != nil {
             http.Error(w, err.Error(), http.StatusForbidden)
@@ -75,7 +75,7 @@ func registerScreenEndpoints(mux *http.ServeMux, access *identityAPI) {
         // Capture once before sending the 200 response: an OS permission
         // denial must remain an actionable HTTP error, not a blank stream.
         screenCaptureLock.Lock()
-        frame, err := screencap.Capture()
+        frame, err := captureScreenFrame()
         screenCaptureLock.Unlock()
         if err != nil {
             http.Error(w, err.Error(), http.StatusForbidden)
@@ -108,7 +108,7 @@ func registerScreenEndpoints(mux *http.ServeMux, access *identityAPI) {
             case <-ticker.C:
             }
             screenCaptureLock.Lock()
-            frame, err = screencap.Capture()
+            frame, err = captureScreenFrame()
             screenCaptureLock.Unlock()
             if err != nil { return }
         }
