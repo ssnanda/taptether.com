@@ -95,7 +95,7 @@ class _PresentationControlsState extends State<PresentationControls> {
     final content = Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Icon(icon, size: landscape ? 20 : 25),
+        Icon(icon, size: landscape ? 20 : 23),
         const SizedBox(height: 2),
         Text(
           label,
@@ -106,7 +106,7 @@ class _PresentationControlsState extends State<PresentationControls> {
       ],
     );
     return SizedBox(
-      height: landscape ? 60 : 78,
+      height: landscape ? 55 : 68,
       child: prominent
           ? FilledButton(key: widgetKey, onPressed: action, child: content)
           : OutlinedButton(key: widgetKey, onPressed: action, child: content),
@@ -136,7 +136,7 @@ class _PresentationControlsState extends State<PresentationControls> {
             if (choice != null) onAppChanged(choice);
           },
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         Row(children: [
           Expanded(child: _sendButton(
             widgetKey: const ValueKey('slide-previous'),
@@ -154,7 +154,7 @@ class _PresentationControlsState extends State<PresentationControls> {
             prominent: true,
           )),
         ]),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Row(children: [
           Expanded(child: _sendButton(
             widgetKey: const ValueKey('slide-start'),

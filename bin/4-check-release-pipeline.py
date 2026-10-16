@@ -211,7 +211,11 @@ presentation = (ROOT / "app" / "lib" / "presentation_mode.dart").read_text(
     encoding="utf-8")
 layout = (ROOT / "app" / "lib" / "remote_layout_settings.dart").read_text(
     encoding="utf-8")
-assert 'Widget _landscapeRemote()' in remote
+assert 'Widget _immersiveLandscapeRemote()' in remote
+assert "MediaQuery.orientationOf(context) == Orientation.landscape" in remote
+assert "ValueKey('landscape-keyboard')" in remote
+assert "Keyboard & shortcuts" in remote
+assert "keyboardExpanded" in layout
 assert 'MediaQuery.orientationOf(context) == Orientation.landscape' in remote
 assert 'Widget _presentationView(bool landscape)' in remote
 assert 'SegmentedButton<String>' in remote

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'discovery.dart';
 import 'network_probes.dart';
@@ -175,9 +176,31 @@ bool lanRangeContains(DetectedLanRange range, String ip) {
   );
 }
 
-/// Return the current phone Wi-Fi CIDR, not a remembered host's old IP.
-/// SSID is optional because iOS may withhold it without Wi-Fi entitlements.
+/// A private 10.x or 172.16.x address is not evidence of Wi-Fi: phones
+/// also receive private cellular and VPN addresses. Never scan those networks.
+bool localDiscoveryTransport(List<ConnectivityResult> transports) =>
+    transports.contains(ConnectivityResult.wifi) ||
+    transports.contains(ConnectivityResult.ethernet);
+
+/// Limit fallback addresses to known local Wi-Fi/Ethernet interfaces.
+/// In particular do not use cellular pdp_ip/rmnet, VPN utun/tun or bridge IPs.
+bool localDiscoveryInterface(String name) {
+  final value = name.toLowerCase();
+  return value == 'en0' || value == 'en1' ||
+      value.startsWith('wlan') || value.startsWith('wifi') ||
+      value.startsWith('wl') || value.startsWith('eth');
+}
+
+/// Return a usable Wi-Fi/Ethernet LAN only while the current transport is
+/// local. Never fall back to the first arbitrary private NetworkInterface.
 Future<DetectedLanRange?> detectLanRange() async {
+  try {
+    final transports = await Connectivity().checkConnectivity();
+    if (!localDiscoveryTransport(transports)) return null;
+  } catch (_) {
+    // If the OS cannot verify a local transport, fail closed.
+    return null;
+  }
   try {
     final info = NetworkInfo();
     final ip = await info.getWifiIP();
@@ -187,22 +210,23 @@ Future<DetectedLanRange?> detectLanRange() async {
       try {
         ssid = await info.getWifiName();
       } catch (_) {
-        // An unavailable SSID must not erase an otherwise valid CIDR.
+        // iOS can withhold SSID even when Wi-Fi is connected.
       }
       final range = rangeFromWifi(ip, mask, ssid: ssid);
       if (range != null) return range;
     }
   } catch (_) {
-    // Platform Wi-Fi data unavailable or privacy restricted.
+    // The transport was verified but Wi-Fi metadata is unavailable.
   }
   try {
     final interfaces = await NetworkInterface.list(
       type: InternetAddressType.IPv4, includeLoopback: false,
     );
     for (final interface in interfaces) {
+      if (!localDiscoveryInterface(interface.name)) continue;
       for (final address in interface.addresses) {
         if (isPrivateIPv4(address.address)) {
-          // Netmask unknown: a conservative /24 window, not the router CIDR.
+          // Wi-Fi interface verified, netmask unknown. Use one /24 only.
           return rangeFromWifi(address.address, '255.255.255.0');
         }
       }

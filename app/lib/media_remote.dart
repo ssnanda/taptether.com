@@ -83,40 +83,44 @@ class _MediaRemoteState extends State<MediaRemote> {
   }
 
   Widget _button(String label, IconData icon, String key, {Key? buttonKey}) {
-    return OutlinedButton.icon(
+    return IconButton.filledTonal(
       key: buttonKey,
+      tooltip: label,
+      iconSize: 25,
       onPressed: widget.enabled ? () => widget.onKey(key) : null,
       icon: Icon(icon),
-      label: Text(label),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      const SizedBox(height: 8),
-      SegmentedButton<MediaService>(
-        key: const ValueKey('media-provider-selector'),
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(value: MediaService.youtube,
-              label: Text('YouTube'), icon: Icon(Icons.play_circle_outline)),
-          ButtonSegment(value: MediaService.netflix,
-              label: Text('Netflix'), icon: Icon(Icons.movie_outlined)),
-        ],
-        selected: {widget.service},
-        onSelectionChanged: (selection) =>
-            widget.onServiceChanged(selection.first),
-      ),
-      if (widget.onOpenService != null)
-        Align(alignment: Alignment.centerRight, child: TextButton.icon(
-          key: const ValueKey('media-open-provider'),
-          onPressed: widget.enabled ? () =>
-              widget.onOpenService!(widget.service) : null,
-          icon: const Icon(Icons.open_in_browser),
-          label: Text('Open ${widget.service.label} on computer'),
+      Row(children: [
+        Expanded(child: SegmentedButton<MediaService>(
+          key: const ValueKey('media-provider-selector'),
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: MediaService.youtube,
+                label: Text('YouTube', maxLines: 1)),
+            ButtonSegment(value: MediaService.netflix,
+                label: Text('Netflix', maxLines: 1)),
+          ],
+          selected: {widget.service},
+          onSelectionChanged: (selection) =>
+              widget.onServiceChanged(selection.first),
         )),
-      const SizedBox(height: 12),
+        if (widget.onOpenService != null) ...[
+          const SizedBox(width: 4),
+          IconButton.outlined(
+            key: const ValueKey('media-open-provider'),
+            tooltip: 'Open selected service on computer',
+            onPressed: widget.enabled ? () =>
+                widget.onOpenService!(widget.service) : null,
+            icon: const Icon(Icons.open_in_browser),
+          ),
+        ],
+      ]),
+      const SizedBox(height: 10),
       TextField(
         key: const ValueKey('media-search-text'),
         controller: _search,
@@ -124,7 +128,7 @@ class _MediaRemoteState extends State<MediaRemote> {
         autocorrect: false,
         decoration: InputDecoration(
           isDense: true,
-          labelText: 'Search ${widget.service.label} videos',
+          hintText: 'Search ${widget.service.label} on your computer',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: IconButton(
             key: const ValueKey('media-search-submit'),
@@ -135,34 +139,31 @@ class _MediaRemoteState extends State<MediaRemote> {
         ),
         onSubmitted: (_) => _submitSearch(),
       ),
-      const SizedBox(height: 5),
-      Text('Search opens in the computer’s default browser.',
-        style: Theme.of(context).textTheme.bodySmall),
-      const SizedBox(height: 16),
-      Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8,
+      const SizedBox(height: 15),
+      Text('Playback', style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 8),
+      Wrap(alignment: WrapAlignment.spaceEvenly, spacing: 10, runSpacing: 8,
         children: [
-          _button('Back', Icons.replay_10, 'Left'),
+          _button('Seek backward', Icons.replay_10, 'Left'),
           _button('Play / Pause', Icons.play_arrow, 'space',
               buttonKey: const ValueKey('media-play-pause')),
-          _button('Forward', Icons.forward_10, 'Right'),
+          _button('Seek forward', Icons.forward_10, 'Right'),
           _button('Full screen', Icons.fullscreen, 'f'),
         ],
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: 16),
       Text('Volume', style: Theme.of(context).textTheme.titleSmall),
-      const SizedBox(height: 6),
-      Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8,
+      const SizedBox(height: 8),
+      Wrap(alignment: WrapAlignment.spaceEvenly, spacing: 10, runSpacing: 8,
         children: [
-          _button('Lower', Icons.volume_down, 'XF86AudioLowerVolume',
+          _button('Lower volume', Icons.volume_down, 'XF86AudioLowerVolume',
               buttonKey: const ValueKey('media-volume-down')),
           _button('Mute', Icons.volume_off, 'XF86AudioMute'),
-          _button('Raise', Icons.volume_up, 'XF86AudioRaiseVolume',
+          _button('Raise volume', Icons.volume_up, 'XF86AudioRaiseVolume',
               buttonKey: const ValueKey('media-volume-up')),
         ],
       ),
-      const SizedBox(height: 10),
-      Text('Playback shortcuts depend on the active video player.',
-        style: Theme.of(context).textTheme.bodySmall),
     ]);
   }
+
 }

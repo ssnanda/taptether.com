@@ -42,6 +42,7 @@ const Set<String> remoteAdvancedSections =
 class RemoteLayoutSettings {
   const RemoteLayoutSettings({
     this.trackpadExpanded = true,
+    this.keyboardExpanded = false,
     this.arrowsExpanded = false,
     this.moreExpanded = false,
     this.presentationMode = false,
@@ -54,6 +55,7 @@ class RemoteLayoutSettings {
   });
 
   final bool trackpadExpanded;
+  final bool keyboardExpanded;
   final bool arrowsExpanded;
   final bool moreExpanded;
   final bool presentationMode;
@@ -66,6 +68,7 @@ class RemoteLayoutSettings {
 
   Map<String, Object> toJson() => {
     'trackpadExpanded': trackpadExpanded,
+    'keyboardExpanded': keyboardExpanded,
     'arrowsExpanded': arrowsExpanded,
     'moreExpanded': moreExpanded,
     'presentationMode': presentationMode,
@@ -93,6 +96,7 @@ class RemoteLayoutSettings {
     return RemoteLayoutSettings(
       trackpadExpanded: values['trackpadExpanded'] is bool
           ? values['trackpadExpanded'] as bool : true,
+      keyboardExpanded: values['keyboardExpanded'] == true,
       arrowsExpanded: values['arrowsExpanded'] == true,
       moreExpanded: values['moreExpanded'] == true,
       presentationMode: values['presentationMode'] == true,

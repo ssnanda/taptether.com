@@ -30,6 +30,7 @@ import 'agent_update_check.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 final RouteObserver<ModalRoute<dynamic>> _remoteRouteObserver =
@@ -407,6 +408,7 @@ class _RemoteScreenState extends State<RemoteScreen>
   final remoteLayoutStore = RemoteLayoutStore();
   final networkLocationStore = NetworkLocationStore();
   Timer? _heartbeatTimer;
+  StreamSubscription<List<ConnectivityResult>>? _networkChanges;
   DetectedLanRange? _wifiRange;
   String? _detectedLocation;
   String _locationFilter = 'automatic';
@@ -453,10 +455,13 @@ class _RemoteScreenState extends State<RemoteScreen>
   bool _appForeground = true;
   bool _pageVisible = true;
   bool _refreshAfterCapture = false;
+  Orientation? _lastRemoteOrientation;
   int _screenEpoch = 0;
 
   bool get _viewingScreen => agent.configured && !_connectionLost &&
-      _appForeground && _pageVisible && _remoteLayout.trackpadExpanded &&
+      _appForeground && _pageVisible &&
+      (_remoteLayout.trackpadExpanded ||
+          (mounted && MediaQuery.orientationOf(context) == Orientation.landscape)) &&
       !_remoteLayout.mediaMode && !_remoteLayout.presentationMode &&
       agent.screenCaptureSupported &&
       VisualModePolicy.normalize(_remoteLayout.visualMode) != 'trackpad';
@@ -547,6 +552,9 @@ class _RemoteScreenState extends State<RemoteScreen>
     unawaited(checkForUpdates());
     unawaited(loadComputers());
     unawaited(_refreshNetworkLocation());
+    _networkChanges = Connectivity().onConnectivityChanged.listen((_) {
+      unawaited(_refreshNetworkLocation());
+    });
     WidgetsBinding.instance.addObserver(this);
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (WidgetsBinding.instance.lifecycleState ==
@@ -562,6 +570,13 @@ class _RemoteScreenState extends State<RemoteScreen>
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
     if (route != null) _remoteRouteObserver.subscribe(this, route);
+    final orientation = MediaQuery.orientationOf(context);
+    if (_lastRemoteOrientation != orientation) {
+      _lastRemoteOrientation = orientation;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncScreen();
+      });
+    }
   }
 
   @override
@@ -600,7 +615,7 @@ class _RemoteScreenState extends State<RemoteScreen>
         _wifiRange = current;
         _detectedLocation = label;
       });
-      if (changed && savedComputers.isNotEmpty) {
+      if (changed && savedComputers.isNotEmpty && current != null) {
         unawaited(_refreshHeartbeats());
       }
     }
@@ -625,6 +640,14 @@ class _RemoteScreenState extends State<RemoteScreen>
   Future<void> _refreshHeartbeats({bool forceRecovery = false}) async {
     if (_checkingHeartbeat || _scanningToReconcile ||
         savedComputers.isEmpty) {
+      return;
+    }
+    // Saved device heartbeats are also LAN traffic; do not probe private
+    // cellular/VPN addresses while Wi-Fi is unavailable.
+    final activeWifi = await detectLanRange();
+    if (!mounted) return;
+    if (activeWifi == null) {
+      setState(() => _online.clear());
       return;
     }
     _checkingHeartbeat = true;
@@ -652,7 +675,7 @@ class _RemoteScreenState extends State<RemoteScreen>
         });
       }
 
-      final wifi = _wifiRange ?? await detectLanRange();
+      final wifi = activeWifi;
       if (wifi != null && missing.isNotEmpty && mounted) {
         final thisNetwork = wifi.cidr;
         final now = DateTime.now();
@@ -975,6 +998,18 @@ class _RemoteScreenState extends State<RemoteScreen>
 
   Future<void> searchNearby() async {
     if (searching || _scanningToReconcile) return;
+    final wifi = await detectLanRange();
+    if (!mounted) return;
+    if (wifi == null) {
+      _discoveryReport.clear();
+      _discoveryReport.add('Discovery skipped: Wi-Fi is not connected');
+      setState(() {
+        nearbyComputers = [];
+        status = 'Connect to Wi-Fi to discover nearby computers. '
+            'Cellular networks are not scanned.';
+      });
+      return;
+    }
     _scanningToReconcile = true;
     _scanVerifiedDeviceIds.clear();
     _discoveryReport.clear();
@@ -987,7 +1022,6 @@ class _RemoteScreenState extends State<RemoteScreen>
     try {
       // Read the Wi-Fi again so a recent SSID switch does not reuse a
       // stale subnet from the preceding heartbeat refresh.
-      final wifi = await detectLanRange() ?? _wifiRange;
       _discoveryReport.add('Wi-Fi: ${wifi?.ip ?? "unknown"} · '
           'CIDR: ${wifi?.cidr ?? "unknown"}');
       final prefixes = wifi?.scanPrefixes.take(8).toList();
@@ -1416,6 +1450,19 @@ class _RemoteScreenState extends State<RemoteScreen>
             label: const Text('Label network'),
           ),
         ]),
+        if (_wifiRange == null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(children: [
+              const Icon(Icons.wifi_off, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text(
+                'Connect to Wi-Fi to discover and scan computers. '
+                'Cellular networks are not scanned.',
+                style: Theme.of(context).textTheme.bodySmall,
+              )),
+            ]),
+          ),
         if (_wifiRange != null)
           Text('Wi-Fi: ${_wifiRange!.cidr}'
               '${_detectedLocation == null ? ' · Unassigned' : ' · ${deviceLocations[_detectedLocation]!}'}',
@@ -1488,37 +1535,34 @@ class _RemoteScreenState extends State<RemoteScreen>
           trailing: const Icon(Icons.add_link),
           onTap: () => selectDiscovered(nearby),
         )),
-      const SizedBox(height: 20),
-      Text('Quick actions', style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 6),
-      Wrap(spacing: 8, runSpacing: 4, children: [
-        ActionChip(
-          avatar: const Icon(Icons.add, size: 18),
-          label: const Text('Pair'),
-          onPressed: showPairForm,
-        ),
-        ActionChip(
-          avatar: const Icon(Icons.qr_code_scanner, size: 18),
-          label: const Text('Scan QR'),
-          onPressed: scanQrPairing,
-        ),
-        ActionChip(
-          avatar: const Icon(Icons.radar, size: 18),
-          label: Text(searching ? 'Searching…' : 'Discover'),
-          onPressed: searching ? null : searchNearby,
-        ),
-        ActionChip(
-          avatar: const Icon(Icons.network_check, size: 18),
-          label: const Text('Scan IPs'),
-          onPressed: scanNetwork,
-        ),
-        ActionChip(
-          avatar: const Icon(Icons.install_desktop, size: 18),
-          label: const Text('Install agent'),
-          onPressed: installingAgent ? null : openAgentInstaller,
-        ),
-      ]),
-      const SizedBox(height: 14),
+      const SizedBox(height: 10),
+      Card(child: ExpansionTile(
+        key: const ValueKey('device-quick-actions'),
+        leading: const Icon(Icons.add_circle_outline),
+        title: const Text('Add or discover a computer'),
+        subtitle: const Text('Pair, scan or install an agent'),
+        children: [
+          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Wrap(spacing: 8, runSpacing: 5, children: [
+              ActionChip(avatar: const Icon(Icons.add, size: 18),
+                label: const Text('Pair'), onPressed: showPairForm),
+              ActionChip(avatar: const Icon(Icons.qr_code_scanner, size: 18),
+                label: const Text('Scan QR'), onPressed: scanQrPairing),
+              ActionChip(avatar: const Icon(Icons.radar, size: 18),
+                label: Text(searching ? 'Searching…' : 'Discover'),
+                onPressed: searching || _wifiRange == null
+                    ? null : searchNearby),
+              ActionChip(avatar: const Icon(Icons.network_check, size: 18),
+                label: const Text('Scan IPs'),
+                onPressed: _wifiRange == null ? null : scanNetwork),
+              ActionChip(avatar: const Icon(Icons.install_desktop, size: 18),
+                label: const Text('Install agent'),
+                onPressed: installingAgent ? null : openAgentInstaller),
+            ]),
+          ),
+        ],
+      )),
+      const SizedBox(height: 8),
       ScanReportPanel(
         title: 'Full Discover Output',
         report: _discoveryReport,
@@ -1786,6 +1830,7 @@ class _RemoteScreenState extends State<RemoteScreen>
     WidgetsBinding.instance.removeObserver(this);
     _remoteRouteObserver.unsubscribe(this);
     _heartbeatTimer?.cancel();
+    unawaited(_networkChanges?.cancel());
     host.dispose(); token.dispose(); pin.dispose(); typing.dispose();
     _movementTimer?.cancel();
     _scrollTimer?.cancel();
@@ -1974,6 +2019,7 @@ class _RemoteScreenState extends State<RemoteScreen>
 
   RemoteLayoutSettings _changedLayout({
     bool? trackpad,
+    bool? keyboard,
     bool? arrows,
     bool? more,
     bool? presenting,
@@ -1985,6 +2031,7 @@ class _RemoteScreenState extends State<RemoteScreen>
     List<String>? quick,
   }) => RemoteLayoutSettings(
     trackpadExpanded: trackpad ?? _remoteLayout.trackpadExpanded,
+    keyboardExpanded: keyboard ?? _remoteLayout.keyboardExpanded,
     arrowsExpanded: arrows ?? _remoteLayout.arrowsExpanded,
     moreExpanded: more ?? _remoteLayout.moreExpanded,
     presentationMode: presenting ?? _remoteLayout.presentationMode,
@@ -2339,17 +2386,17 @@ class _RemoteScreenState extends State<RemoteScreen>
 
 
   Widget _modeSwitcher() => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
+    padding: const EdgeInsets.symmetric(vertical: 3),
     child: SegmentedButton<String>(
       key: const ValueKey('remote-mode-switcher'),
       showSelectedIcon: false,
       segments: const [
-        ButtonSegment<String>(value: 'remote', label: Text('Remote'),
-          icon: Icon(Icons.mouse_outlined)),
-        ButtonSegment<String>(value: 'presentation', label: Text('Presentation'),
-          icon: Icon(Icons.slideshow_outlined)),
-        ButtonSegment<String>(value: 'media', label: Text('Media'),
-          icon: Icon(Icons.smart_display_outlined)),
+        ButtonSegment<String>(value: 'remote',
+          label: Text('Remote', maxLines: 1, softWrap: false)),
+        ButtonSegment<String>(value: 'presentation',
+          label: Text('Presentation', maxLines: 1, softWrap: false)),
+        ButtonSegment<String>(value: 'media',
+          label: Text('Media', maxLines: 1, softWrap: false)),
       ],
       selected: {
         _remoteLayout.presentationMode ? 'presentation'
@@ -2365,7 +2412,7 @@ class _RemoteScreenState extends State<RemoteScreen>
   );
 
   Widget _visualModeSelector() => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
+    padding: const EdgeInsets.symmetric(vertical: 3),
     child: SegmentedButton<String>(
       key: const ValueKey('screen-view-mode-switcher'),
       showSelectedIcon: false,
@@ -2464,105 +2511,144 @@ class _RemoteScreenState extends State<RemoteScreen>
     );
   }
 
-  Widget _landscapeRemote() {
-    final screen = MediaQuery.sizeOf(context);
-    final safe = MediaQuery.paddingOf(context);
-    final available = (screen.height - safe.vertical -
-        kToolbarHeight - 132.0).clamp(185.0, 390.0).toDouble();
-    return SizedBox(
-      key: const ValueKey('landscape-remote'),
-      height: available,
-      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(
-          flex: 6,
-          child: Column(children: [
-            Row(children: [
-              Expanded(child: TextButton.icon(
-                key: const ValueKey('landscape-trackpad-toggle'),
-                onPressed: () => _setLayout(_changedLayout(
-                  trackpad: !_remoteLayout.trackpadExpanded,
-                )),
-                icon: Icon(_remoteLayout.trackpadExpanded
-                    ? Icons.expand_less : Icons.expand_more),
-                label: Text(_remoteLayout.trackpadExpanded
-                    ? 'Hide trackpad' : 'Show trackpad'),
-              )),
-            ]),
-            if (_remoteLayout.trackpadExpanded) ...[
-              Expanded(child: LayoutBuilder(
-                builder: (context, limits) => _remoteInputSurface(
-                  height: limits.maxHeight,
-                ),
-              )),
-              const SizedBox(height: 4),
-              Row(children: [
-                Expanded(child: OutlinedButton(
-                  onPressed: _connectionLost ? null :
-                      () => command('click', {'button': 'left'}),
-                  child: const Text('Left click'),
-                )),
-                const SizedBox(width: 6),
-                Expanded(child: OutlinedButton(
-                  onPressed: _connectionLost ? null :
-                      () => command('click', {'button': 'right'}),
-                  child: const Text('Right click'),
-                )),
-              ]),
-            ] else
-              const Expanded(child: Center(
-                child: Text('Trackpad hidden. Tap Show trackpad to open.'),
-              )),
-          ]),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          flex: 5,
+  void _openLandscapeTools() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16,
+              MediaQuery.viewInsetsOf(sheetContext).bottom + 16),
           child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _landscapeTyping(),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Expanded(child: Text('Quick keys',
-                    style: Theme.of(context).textTheme.titleSmall)),
-                  TextButton(
-                    onPressed: _customizeQuickKeys,
-                    child: const Text('Customize'),
-                  ),
-                ]),
-                if (_remoteLayout.quickKeys.isEmpty)
-                  const Text('Add quick keys using Customize.')
-                else
-                  Wrap(spacing: 4, runSpacing: 3, children: [
-                    for (final id in _remoteLayout.quickKeys)
-                      _quickKeyButton(id),
-                  ]),
-                TextButton.icon(
-                  onPressed: () => _setLayout(_changedLayout(
-                    arrows: !_remoteLayout.arrowsExpanded,
-                  )),
-                  icon: Icon(_remoteLayout.arrowsExpanded
-                      ? Icons.expand_less : Icons.expand_more),
-                  label: const Text('Arrow pad'),
-                ),
-                if (_remoteLayout.arrowsExpanded) _arrowPad(),
-                OutlinedButton.icon(
-                  onPressed: () => _setLayout(_changedLayout(
-                    more: !_remoteLayout.moreExpanded,
-                  )),
-                  icon: Icon(_remoteLayout.moreExpanded
-                      ? Icons.expand_less : Icons.expand_more),
-                  label: const Text('More controls'),
-                ),
-                if (_remoteLayout.moreExpanded) ..._moreControlSections(),
-              ],
-            ),
+            child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Keyboard & shortcuts',
+                  style: Theme.of(sheetContext).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              _keyboardControls(),
+            ]),
           ),
         ),
-      ]),
+      ),
     );
   }
+
+  Widget _immersiveLandscapeRemote() => LayoutBuilder(
+    builder: (context, bounds) => Stack(fit: StackFit.expand, children: [
+      _remoteInputSurface(height: bounds.maxHeight),
+      Positioned(left: 12, top: 8, right: 12,
+        child: Material(
+          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
+          borderRadius: BorderRadius.circular(16),
+          elevation: 3,
+          child: Row(children: [
+            const SizedBox(width: 8),
+            Expanded(child: _visualModeSelector()),
+            IconButton(
+              key: const ValueKey('landscape-keyboard'),
+              tooltip: 'Keyboard and shortcuts',
+              onPressed: _openLandscapeTools,
+              icon: const Icon(Icons.keyboard_outlined),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Remote options',
+              icon: const Icon(Icons.more_vert),
+              onSelected: (choice) {
+                if (choice == 'presentation' || choice == 'media') {
+                  _setLayout(_changedLayout(
+                    presenting: choice == 'presentation',
+                    mediaMode: choice == 'media',
+                  ));
+                } else if (choice == 'devices') {
+                  _stopScreen();
+                  agent.disconnect();
+                  setState(() => status = 'Select a device to connect.');
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'presentation',
+                    child: Text('Presentation')),
+                PopupMenuItem(value: 'media', child: Text('Media')),
+                PopupMenuDivider(),
+                PopupMenuItem(value: 'devices', child: Text('Switch computer')),
+              ],
+            ),
+          ]),
+        ),
+      ),
+      Positioned(left: 16, bottom: 8,
+        child: IgnorePointer(child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(8)),
+          child: Padding(padding: const EdgeInsets.symmetric(
+              horizontal: 9, vertical: 4),
+            child: Text(discoveredName ?? host.text.trim(),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall)),
+        )),
+      ),
+    ]),
+  );
+
+  Widget _keyboardControls() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _landscapeTyping(),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: OutlinedButton.icon(
+          onPressed: _connectionLost ? null :
+              () => command('click', {'button': 'left'}),
+          icon: const Icon(Icons.touch_app_outlined, size: 18),
+          label: const Text('Left click'),
+        )),
+        const SizedBox(width: 8),
+        Expanded(child: OutlinedButton.icon(
+          onPressed: _connectionLost ? null :
+              () => command('click', {'button': 'right'}),
+          icon: const Icon(Icons.ads_click, size: 18),
+          label: const Text('Right click'),
+        )),
+      ]),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: Text('Quick keys',
+            style: Theme.of(context).textTheme.titleSmall)),
+        TextButton.icon(
+          onPressed: _customizeQuickKeys,
+          icon: const Icon(Icons.tune, size: 16),
+          label: const Text('Customize'),
+        ),
+      ]),
+      if (_remoteLayout.quickKeys.isEmpty)
+        const Text('Add your preferred keys using Customize.')
+      else
+        Wrap(spacing: 6, runSpacing: 3, children: [
+          for (final id in _remoteLayout.quickKeys) _quickKeyButton(id),
+        ]),
+      TextButton.icon(
+        key: const ValueKey('arrow-keys-toggle'),
+        onPressed: () => _setLayout(_changedLayout(
+          arrows: !_remoteLayout.arrowsExpanded)),
+        icon: Icon(_remoteLayout.arrowsExpanded
+            ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+        label: Text(_remoteLayout.arrowsExpanded
+            ? 'Hide arrow keys' : 'Arrow keys'),
+      ),
+      if (_remoteLayout.arrowsExpanded) _arrowPad(),
+      OutlinedButton.icon(
+        key: const ValueKey('more-controls-toggle'),
+        onPressed: () => _setLayout(_changedLayout(
+          more: !_remoteLayout.moreExpanded)),
+        icon: Icon(_remoteLayout.moreExpanded
+            ? Icons.expand_less : Icons.expand_more),
+        label: Text(_remoteLayout.moreExpanded
+            ? 'Hide more controls' : 'More controls'),
+      ),
+      if (_remoteLayout.moreExpanded) ..._moreControlSections(),
+    ],
+  );
 
   Widget _landscapeTyping() => TextField(
     controller: typing,
@@ -2583,146 +2669,63 @@ class _RemoteScreenState extends State<RemoteScreen>
   );
 
   Widget _connectedControls() {
-    final colors = Theme.of(context).colorScheme;
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        Icon(Icons.circle, color: _connectionLost ? colors.error
-            : colors.primary, size: 11),
-        const SizedBox(width: 8),
-        Expanded(child: Text(discoveredName ?? host.text.trim(),
-            maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleMedium)),
-        IconButton(
-          tooltip: 'Switch computer',
-          onPressed: () {
-            _stopScreen();
-            agent.disconnect();
-            setState(() {
-              _connectionLost = false;
-              _agentInputDenied = false;
-              _connectionTechnical = null;
-              status = 'Select a device to connect.';
-            });
-          },
-          icon: const Icon(Icons.swap_horiz, size: 20),
-        ),
-      ]),
       if (_connectionLost) _connectionBanner(),
       if (_agentInputDenied && !_connectionLost)
         Card(
           key: const ValueKey('mac-accessibility-warning'),
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Mac input permission required',
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
-                const Text('Your Mac is online, but macOS is blocking '
-                    'mouse and keyboard control. On the Mac, open '
-                    'System Settings → Privacy & Security → Accessibility, '
-                    'allow ~/.local/bin/taptether-agent, then restart the agent.'),
-              ],
-            ),
+                const Text('Open macOS System Settings → Privacy & Security '
+                    '→ Accessibility and allow TapTether Input Core. '
+                    'Then restart TapTether if needed.'),
+              ]),
           ),
         ),
       _modeSwitcher(),
       if (_remoteLayout.presentationMode) _presentationView(landscape),
       if (_remoteLayout.mediaMode) _mediaView(landscape),
-      if (!_remoteLayout.presentationMode && !_remoteLayout.mediaMode &&
-          landscape) ...[
+      if (!_remoteLayout.presentationMode && !_remoteLayout.mediaMode) ...[
         _visualModeSelector(),
-        _landscapeRemote(),
-      ],
-      if (!_remoteLayout.presentationMode && !_remoteLayout.mediaMode &&
-          !landscape) ...[
-        _visualModeSelector(),
-      ListTile(
-        key: const ValueKey('trackpad-toggle'),
-        dense: true,
-        visualDensity: VisualDensity.compact,
-        contentPadding: EdgeInsets.zero,
-        title: Text('Trackpad',
-            style: Theme.of(context).textTheme.titleMedium),
-        trailing: Icon(_remoteLayout.trackpadExpanded
-            ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-        onTap: () => _setLayout(_changedLayout(
-          trackpad: !_remoteLayout.trackpadExpanded)),
-      ),
-      if (_remoteLayout.trackpadExpanded) ...[
-        _remoteInputSurface(),
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: OutlinedButton(
-            onPressed: _connectionLost ? null :
-                () => command('click', {'button': 'left'}),
-            child: const Text('Left click'),
-          )),
-          const SizedBox(width: 8),
-          Expanded(child: OutlinedButton(
-            onPressed: _connectionLost ? null :
-                () => command('click', {'button': 'right'}),
-            child: const Text('Right click'),
-          )),
-        ]),
-        const SizedBox(height: 8),
-      ],
-      TextField(
-        controller: typing,
-        enabled: !_connectionLost,
-        autocorrect: false,
-        enableSuggestions: false,
-        decoration: const InputDecoration(
-          isDense: true,
-          prefixIcon: Icon(Icons.keyboard_outlined),
-          labelText: 'Type on computer',
-        ),
-        onChanged: (text) {
-          if (text.isNotEmpty) {
-            unawaited(command('text', {'text': text}));
-            typing.clear();
-          }
-        },
-      ),
-      const SizedBox(height: 10),
-      Row(children: [
-        Expanded(child: Text('Shortcuts',
-            style: Theme.of(context).textTheme.titleSmall)),
-        TextButton.icon(
-          onPressed: _customizeQuickKeys,
-          icon: const Icon(Icons.tune, size: 18),
-          label: const Text('Customize'),
-        ),
-      ]),
-      if (_remoteLayout.quickKeys.isEmpty)
-        const Text('Choose shortcuts using Customize.')
-      else
-        Wrap(spacing: 8, runSpacing: 4, children: [
-          for (final id in _remoteLayout.quickKeys) _quickKeyButton(id),
-        ]),
-      TextButton.icon(
-        key: const ValueKey('arrow-keys-toggle'),
-        onPressed: () => _setLayout(_changedLayout(
-          arrows: !_remoteLayout.arrowsExpanded)),
-        icon: Icon(_remoteLayout.arrowsExpanded
-            ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-        label: Text(_remoteLayout.arrowsExpanded
-            ? 'Hide arrow keys' : 'Show arrow keys'),
-      ),
-      if (_remoteLayout.arrowsExpanded) _arrowPad(),
-      const Divider(),
-      OutlinedButton.icon(
-        key: const ValueKey('more-controls-toggle'),
-        onPressed: () => _setLayout(_changedLayout(
-          more: !_remoteLayout.moreExpanded)),
-        icon: Icon(_remoteLayout.moreExpanded
-            ? Icons.expand_less : Icons.expand_more),
-        label: Text(_remoteLayout.moreExpanded
-            ? 'Hide more controls' : 'More controls'),
-      ),
-      if (_remoteLayout.moreExpanded) ..._moreControlSections(),
+        const SizedBox(height: 4),
+        if (!_remoteLayout.keyboardExpanded) ...[
+          Row(children: [
+            Expanded(child: Text(
+              VisualModePolicy.normalize(_remoteLayout.visualMode) == 'trackpad'
+                  ? 'Trackpad' : 'Screen control',
+              style: Theme.of(context).textTheme.titleSmall)),
+            TextButton.icon(
+              key: const ValueKey('trackpad-toggle'),
+              onPressed: () => _setLayout(_changedLayout(
+                trackpad: !_remoteLayout.trackpadExpanded,
+                keyboard: false)),
+              icon: Icon(_remoteLayout.trackpadExpanded
+                  ? Icons.expand_less : Icons.expand_more, size: 18),
+              label: Text(_remoteLayout.trackpadExpanded ? 'Hide' : 'Show'),
+            ),
+          ]),
+          if (_remoteLayout.trackpadExpanded) _remoteInputSurface(),
+        ],
+        const SizedBox(height: 6),
+        Card(child: ExpansionTile(
+          key: ValueKey('remote-keyboard-${_remoteLayout.keyboardExpanded}'),
+          initiallyExpanded: _remoteLayout.keyboardExpanded,
+          leading: const Icon(Icons.keyboard_outlined),
+          title: const Text('Keyboard & shortcuts'),
+          subtitle: const Text('Expand to type or use extra keys'),
+          onExpansionChanged: (expanded) => _setLayout(_changedLayout(
+              keyboard: expanded, trackpad: !expanded)),
+          children: [
+            Padding(padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: _keyboardControls()),
+          ],
+        )),
       ],
     ]);
   }
@@ -2730,6 +2733,15 @@ class _RemoteScreenState extends State<RemoteScreen>
   @override
   Widget build(BuildContext context) {
     final connected = agent.configured;
+    final immersive = connected &&
+        MediaQuery.orientationOf(context) == Orientation.landscape &&
+        !_remoteLayout.presentationMode && !_remoteLayout.mediaMode;
+    if (immersive) {
+      return Scaffold(
+        key: _scaffoldKey,
+        body: SafeArea(child: _immersiveLandscapeRemote()),
+      );
+    }
     return Scaffold(
       key: _scaffoldKey,
       drawer: appDrawer(),
@@ -2739,10 +2751,36 @@ class _RemoteScreenState extends State<RemoteScreen>
           icon: const Icon(Icons.menu),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        title: const Text('TapTether'), actions: [
-        IconButton(tooltip: 'Disconnect', onPressed: connected ? () {
-          _stopScreen(); agent.disconnect(); setState(() => status = 'Disconnected');
-        } : null, icon: const Icon(Icons.link_off)),
+        title: connected
+            ? Row(children: [
+                Icon(Icons.circle, size: 10,
+                  color: _connectionLost
+                      ? Theme.of(context).colorScheme.error
+                      : Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                Expanded(child: Text(discoveredName ?? host.text.trim(),
+                  maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ])
+            : const Text('TapTether'),
+        actions: [
+          if (connected) IconButton(
+            tooltip: 'Switch computer',
+            onPressed: () {
+              _stopScreen();
+              agent.disconnect();
+              setState(() => status = 'Select a device to connect.');
+            },
+            icon: const Icon(Icons.swap_horiz),
+          ),
+          if (connected) IconButton(
+            tooltip: 'Disconnect',
+            onPressed: () {
+              _stopScreen();
+              agent.disconnect();
+              setState(() => status = 'Disconnected');
+            },
+            icon: const Icon(Icons.link_off),
+          ),
       ]),
       body: SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: [
         if (!connected) ...[

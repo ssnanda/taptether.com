@@ -128,11 +128,7 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Security & Appearance')),
     body: ListView(padding: const EdgeInsets.all(16), children: [
-      Text('App security',
-          style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 6),
-      const Text('Protect saved devices and SSH keys on this phone. '
-          'App lock is optional and works offline.'),
+      const Text('Protect your saved devices and keys with an optional app lock.'),
       if (_busy) const LinearProgressIndicator(),
       if (_error != null) Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -207,9 +203,13 @@ class _SecuritySettingsScreenState extends State<SecuritySettingsScreen> {
           },
         ),
       ),
-      const Divider(height: 32),
-      const Text('Private SSH key export requires another app-unlock '
-          'check when app lock is enabled. Your PIN is never uploaded.'),
+      const SizedBox(height: 12),
+      const ExpansionTile(
+        title: Text('Privacy & security details'),
+        childrenPadding: EdgeInsets.fromLTRB(12, 0, 12, 12),
+        children: [Text('Private SSH key export requires another unlock '
+            'check when app lock is enabled. Your PIN stays on the phone.')],
+      ),
     ]),
   );
 }

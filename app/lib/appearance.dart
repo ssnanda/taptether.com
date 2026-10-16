@@ -43,13 +43,15 @@ class TapTetherPalette {
       scaffoldBackgroundColor: canvas,
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.white, foregroundColor: ink,
-        surfaceTintColor: Colors.transparent, centerTitle: true,
+        surfaceTintColor: Colors.transparent, centerTitle: false,
+        toolbarHeight: 54, titleTextStyle: TextStyle(color: ink,
+          fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.35),
       ),
       cardTheme: CardThemeData(
         color: Colors.white, elevation: 0,
-        margin: const EdgeInsets.symmetric(vertical: 5),
+        margin: const EdgeInsets.symmetric(vertical: 3),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           side: const BorderSide(color: Color(0xFFDCE6E9)),
         ),
       ),
@@ -57,14 +59,24 @@ class TapTetherPalette {
       inputDecorationTheme: InputDecorationTheme(
         filled: true, fillColor: Colors.white,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       ),
       filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       )),
+      segmentedButtonTheme: SegmentedButtonThemeData(style: SegmentedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      )),
+      expansionTileTheme: const ExpansionTileThemeData(
+        tilePadding: EdgeInsets.symmetric(horizontal: 12),
+        childrenPadding: EdgeInsets.symmetric(horizontal: 12),
+        shape: Border(), collapsedShape: Border(),
+      ),
       outlinedButtonTheme: OutlinedButtonThemeData(style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       )),
     );
@@ -74,6 +86,19 @@ class TapTetherPalette {
     brightness: Brightness.dark, useMaterial3: true,
     colorSchemeSeed: const Color(0xFF57E6C2),
     scaffoldBackgroundColor: const Color(0xFF102326),
-    appBarTheme: const AppBarTheme(centerTitle: true),
+    appBarTheme: const AppBarTheme(centerTitle: false, toolbarHeight: 54),
+    cardTheme: CardThemeData(elevation: 0,
+      margin: const EdgeInsets.symmetric(vertical: 3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))),
+    inputDecorationTheme: InputDecorationTheme(
+      isDense: true,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(style: SegmentedButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+      textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    )),
   );
 }

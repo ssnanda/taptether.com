@@ -10,6 +10,7 @@ void main() {
       () {
     final value = RemoteLayoutSettings.fromJson(null);
     expect(value.trackpadExpanded, true);
+    expect(value.keyboardExpanded, false);
     expect(value.arrowsExpanded, false);
     expect(value.moreExpanded, false);
     expect(value.presentationMode, false);
@@ -26,6 +27,7 @@ void main() {
     final store = RemoteLayoutStore();
     const custom = RemoteLayoutSettings(
       trackpadExpanded: false,
+      keyboardExpanded: true,
       arrowsExpanded: true,
       moreExpanded: true,
       presentationMode: true,
@@ -42,6 +44,7 @@ void main() {
     final anotherHost = await store.read('192.168.68.87');
     expect(anotherHost.quickKeys, defaultRemoteQuickKeys);
     expect(anotherHost.trackpadExpanded, true);
+    expect(anotherHost.keyboardExpanded, false);
     expect(anotherHost.presentationMode, false);
   });
 
@@ -57,6 +60,7 @@ void main() {
     expect(remoteQuickKeyLabels['f12'], 'F12');
     expect(parsed.expandedSections, ['editing']);
     expect(parsed.trackpadExpanded, false);
+    expect(parsed.keyboardExpanded, false);
     expect(parsed.presentationMode, true);
     expect(parsed.presentationApp, 'powerPoint');
     expect(parsed.mediaMode, false);

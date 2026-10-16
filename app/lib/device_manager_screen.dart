@@ -159,14 +159,17 @@ class _DeviceManagerScreenState extends State<DeviceManagerScreen> {
     body: ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('${_computers.length} saved ${_computers.length == 1 ? 'computer' : 'computers'}',
-          style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 12),
-        SizedBox(width: double.infinity, child: FilledButton.icon(
-          onPressed: () => Navigator.pop(context, true),
-          icon: const Icon(Icons.add),
-          label: const Text('Add computer'),
-        )),
+        Row(children: [
+          Expanded(child: Text(
+            '${_computers.length} saved ${_computers.length == 1 ? 'computer' : 'computers'}',
+            style: Theme.of(context).textTheme.titleMedium)),
+          TextButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.add),
+            label: const Text('Add computer'),
+          ),
+        ]),
+        const SizedBox(height: 8),
         if (_busy) const LinearProgressIndicator(),
         if (_error != null) Padding(
           padding: const EdgeInsets.all(8),
@@ -214,11 +217,14 @@ class _DeviceManagerScreenState extends State<DeviceManagerScreen> {
               ],
             ),
           )),
-        const SizedBox(height: 16),
-        Text('Saved connections retain their verified TLS fingerprint '
-            'and authentication credentials. Changing an address does not '
-            'silently trust a different computer.',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 12),
+        const ExpansionTile(
+          title: Text('How device trust is preserved'),
+          childrenPadding: EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [Text('Saved connections retain their verified TLS '
+              'fingerprint and authentication. Changing an address does '
+              'not trust a different computer.')],
+        ),
       ],
     ),
   );

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'lan_scan.dart';
 import 'computer_store.dart';
@@ -26,6 +27,7 @@ class LanScanScreen extends StatefulWidget {
     this.verifyPairedAgent,
     this.scanRange,
     this.initialNetwork,
+    this.networkDetector,
   });
   final String? initialIp;
   final List<SavedComputer> knownComputers;
@@ -36,15 +38,22 @@ class LanScanScreen extends StatefulWidget {
   final Future<String?> Function(String ip)? verifyPairedAgent;
   final LanRangeScanner? scanRange;
   final DetectedLanRange? initialNetwork;
+  final Future<DetectedLanRange?> Function()? networkDetector;
 
   @override
   State<LanScanScreen> createState() => _LanScanScreenState();
 }
 
-class _LanScanScreenState extends State<LanScanScreen> {
+class _LanScanScreenState extends State<LanScanScreen>
+    with WidgetsBindingObserver {
   final _prefix = TextEditingController();
   final _specificIp = TextEditingController();
   DetectedLanRange? _network;
+  StreamSubscription<List<ConnectivityResult>>? _connectivityChanges;
+  bool _networkChecked = false;
+
+  Future<DetectedLanRange?> _activeNetwork() =>
+      widget.networkDetector?.call() ?? detectLanRange();
   bool _checkingSpecificIp = false;
   String? _notRespondingIp;
   bool _editedPrefix = false;
@@ -64,13 +73,38 @@ class _LanScanScreenState extends State<LanScanScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_loadDefault());
+    if (widget.networkDetector == null) {
+      _connectivityChanges = Connectivity().onConnectivityChanged.listen(
+        (transports) {
+          if (!localDiscoveryTransport(transports)) {
+            _cancel = true;
+            if (mounted) setState(() {
+              _network = null;
+              _networkChecked = true;
+              _hosts = [];
+              _error = 'Connect to Wi-Fi to scan nearby computers.';
+            });
+          } else {
+            if (_busy) _cancel = true;
+            unawaited(_loadDefault());
+          }
+        },
+      );
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_loadDefault());
   }
 
   Future<void> _loadDefault() async {
-    final range = widget.initialNetwork ?? await detectLanRange();
+    final range = await _activeNetwork();
     if (!mounted) return;
     setState(() {
+      _networkChecked = true;
       _network = range;
       if (!_editedPrefix) {
         _prefix.text = range?.activePrefix ??
@@ -86,6 +120,8 @@ class _LanScanScreenState extends State<LanScanScreen> {
   @override
   void dispose() {
     _cancel = true;
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_connectivityChanges?.cancel());
     _prefix.dispose();
     _specificIp.dispose();
     super.dispose();
@@ -139,6 +175,21 @@ class _LanScanScreenState extends State<LanScanScreen> {
   Future<void> _startScan() async {
     if (_busy) return;
     FocusScope.of(context).unfocus();
+    final wifi = await _activeNetwork();
+    if (!mounted) return;
+    if (wifi == null) {
+      _report.clear();
+      _report.add('IP scan skipped: no active Wi-Fi network');
+      setState(() {
+        _network = null;
+        _networkChecked = true;
+        _error = 'Connect to Wi-Fi to scan nearby computers. '
+            'Cellular networks are not scanned.';
+      });
+      return;
+    }
+    _network = wifi;
+    if (!_editedPrefix) _prefix.text = wifi.activePrefix;
     final prefix = _prefix.text.trim();
     if (!validPrivate24Prefix(prefix)) {
       setState(() => _error = 'Enter a private IPv4 /24 prefix (e.g. 192.168.1).');
@@ -147,8 +198,8 @@ class _LanScanScreenState extends State<LanScanScreen> {
     // Full-network mode uses the detected CIDR, including the .0/.255
     // addresses that are usable inside a /23 or /22. A custom prefix is
     // always a single /24; selecting one disables full-network mode.
-    final wholeNetwork = _scanWholeNetwork && _network != null &&
-        _network!.scanPrefixes.length <= 8;
+    final wholeNetwork = _scanWholeNetwork &&
+        wifi.scanPrefixes.length <= 8;
     final targets = wholeNetwork ? _network!.scanPrefixes : [prefix];
     final bounds = <({int startHost, int endHost})>[
       for (final target in targets)
@@ -193,9 +244,10 @@ class _LanScanScreenState extends State<LanScanScreen> {
           cancelled: () => _cancel,
           onAgentFound: _showAgentCandidate,
           onProbe: (ip, ports) {
-            _report.add('$ip: ${ports.isEmpty
-                ? "no tested TCP port accepted (not proof of offline)"
-                : "TCP open ${ports.join(", ")}"}');
+            // A nonresponsive private address is not a meaningful result.
+            if (ports.isNotEmpty) {
+              _report.add('$ip: TCP open ${ports.join(", ")}');
+            }
           },
           onProgress: (done, _) {
             if (mounted) {
@@ -256,6 +308,14 @@ class _LanScanScreenState extends State<LanScanScreen> {
     final ip = _specificIp.text.trim();
     if (!validPrivate24Prefix(prefixFromIp(ip) ?? '')) {
       setState(() => _error = 'Enter a private IPv4 address, e.g. 192.168.1.77');
+      return;
+    }
+    final wifi = await _activeNetwork();
+    if (!mounted) return;
+    if (wifi == null) {
+      _report.clear();
+      _report.add('Manual IP check skipped: no active Wi-Fi network');
+      setState(() => _error = 'Connect to Wi-Fi before checking a LAN IP.');
       return;
     }
     _report.add('Manual IP check: $ip · TCP ports ${lanScanPorts.join(", ")}');
@@ -320,9 +380,19 @@ class _LanScanScreenState extends State<LanScanScreen> {
       body: SafeArea(child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('Discover nearby devices on your local Wi-Fi.'),
-          const SizedBox(height: 12),
-          if (_network != null) ...[
+          const SizedBox(height: 4),
+          if (_networkChecked && _network == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(children: [
+                const Icon(Icons.wifi_off, size: 24),
+                const SizedBox(width: 12),
+                const Expanded(child: Text(
+                  'Wi-Fi required for local discovery. Connect to a '
+                  'Wi-Fi network to scan. Cellular networks are not scanned.')),
+              ]),
+            ),
+          if (_network != null) ...[ 
             Text('Phone Wi-Fi: ${_network!.ip} · Network: ${_network!.cidr}',
                 style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
@@ -393,7 +463,7 @@ class _LanScanScreenState extends State<LanScanScreen> {
                 label: const Text('Stop scan')),
           ] else
             FilledButton.icon(
-              onPressed: _startScan,
+              onPressed: _network == null ? null : _startScan,
               icon: const Icon(Icons.radar),
               label: const Text('Start IP scan'),
             ),
@@ -406,9 +476,6 @@ class _LanScanScreenState extends State<LanScanScreen> {
           Text('Check a specific computer',
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 6),
-          Text('A Mac may not appear in a full scan if its services are '
-              'blocked. Check its known IP directly, or pair it manually.',
-              style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: TextField(
@@ -425,7 +492,7 @@ class _LanScanScreenState extends State<LanScanScreen> {
             )),
             const SizedBox(width: 8),
             OutlinedButton(
-              onPressed: _busy || _checkingSpecificIp
+              onPressed: _busy || _checkingSpecificIp || _network == null
                   ? null : _checkSpecificIp,
               child: Text(_checkingSpecificIp ? 'Checking…' : 'Check IP'),
             ),
@@ -479,14 +546,15 @@ class _LanScanScreenState extends State<LanScanScreen> {
             title: 'Full Scan Output',
             report: _report,
           ),
-          const SizedBox(height: 12),
-          Text('MAC addresses come from paired agents or their LAN '
-              'neighbor caches when available. They may be missing '
-              'or stale, and do not prove a device is online.',
-              style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 6),
-          const Text('Tap any result to use its IP in the computer pairing form. '
-              'An IP scan does not authorize access to a computer.'),
+          const SizedBox(height: 8),
+          const ExpansionTile(
+            title: Text('About scan results'),
+            childrenPadding: EdgeInsets.fromLTRB(12, 0, 12, 12),
+            children: [Text('Network scans find addresses, not trusted '
+                'identities. Tap a result to use its IP for pairing. '
+                'A missing or stale MAC address does not establish '
+                'whether a computer is online or authorized.')],
+          ),
         ],
       )),
     );
