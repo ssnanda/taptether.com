@@ -12,6 +12,8 @@ command -v python3 >/dev/null 2>&1 || { echo 'Python 3 required' >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo 'Sign in with gh auth login (or set GH_TOKEN in CI)' >&2; exit 1; }
 [[ "$(git branch --show-current)" == main ]] || { echo 'Publish only from main.' >&2; exit 1; }
 [[ "$(git remote get-url origin)" == *ssnanda/taptether.com* ]] || { echo 'Refusing unknown Git origin.' >&2; exit 1; }
+# Full releases must be newer than all independently released desktop agents.
+python3 bin/4-guard-release-sync.py
 mkdir -p "$STAGE"
 # The stable release folder never retains earlier versions.
 find "$STAGE" -maxdepth 1 -type f -name 'TapTether*' -delete

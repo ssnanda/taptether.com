@@ -11,26 +11,43 @@ case "$arch" in x86_64) arch=amd64;; arm64) ;; *) echo "Unsupported Mac: $arch" 
 bin="$HOME/.local/bin/taptether-agent"
 current="$("$bin" --version 2>/dev/null || echo 0.0.0+0)"
 info="$(python3 - "$arch" "$current" <<'PY'
-import json, re, sys, urllib.request
-arch, installed=sys.argv[1:]
-req=urllib.request.Request('https://api.github.com/repos/ssnanda/taptether.com/releases/tags/current',
-                          headers={'Accept':'application/vnd.github+json','User-Agent':'TapTether-macOS-Updater'})
-with urllib.request.urlopen(req,timeout=12) as response: data=json.load(response)
-match=re.search(r'(\d+\.\d+\.\d+\+\d+)',data.get('name',''))
-if not match: raise SystemExit('Release version not published.')
-latest=match.group(1)
-def parse(v):
-    m=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)\+(\d+)',v)
-    if not m: raise SystemExit('Invalid version: '+v)
-    return tuple(map(int,m.groups()))
-asset=next((a for a in data.get('assets',[]) if a.get('name')=='TapTetherAgent-macOS-'+arch+'.tar.gz'),None)
-if not asset: raise SystemExit('macOS installer asset missing')
-digest=asset.get('digest','')
-if not re.fullmatch(r'sha256:[0-9a-f]{64}',digest): raise SystemExit('No release SHA-256 digest')
-url=asset.get('browser_download_url','')
-expected=f'https://github.com/ssnanda/taptether.com/releases/download/current/TapTetherAgent-macOS-{arch}.tar.gz'
-if url!=expected: raise SystemExit('Unexpected release URL')
-print('\t'.join([latest,'yes' if parse(latest)>parse(installed) else 'no',digest[7:],url]))
+import json, re, sys, urllib.error, urllib.request
+arch, installed = sys.argv[1:]
+repo = "ssnanda/taptether.com"
+def parts(v):
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)\+(\d+)", v)
+    if not m: raise SystemExit("Invalid TapTether version: " + v)
+    return tuple(int(x) for x in m.groups())
+def fetch(tag):
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/releases/tags/{tag}",
+        headers={"Accept": "application/vnd.github+json",
+                 "User-Agent": "TapTether-macOS-Updater"})
+    with urllib.request.urlopen(req, timeout=12) as response:
+        return json.load(response)
+def verify(data, tag):
+    if data.get("tag_name") != tag:
+        raise SystemExit("Unexpected release tag")
+    match = re.match(r"^TapTether(?: macOS)? (\d+\.\d+\.\d+\+\d+)(?:\s|$)", data.get("name", ""))
+    if not match: raise SystemExit(f"{tag}: version metadata unavailable")
+    name = f"TapTetherAgent-macOS-{arch}.tar.gz"
+    assets = [a for a in data.get("assets", []) if a.get("name") == name]
+    if len(assets) != 1: raise SystemExit(f"{tag}: expected agent archive missing")
+    asset = assets[0]
+    digest = asset.get("digest", "")
+    if not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
+        raise SystemExit(f"{tag}: invalid SHA-256")
+    url = f"https://github.com/{repo}/releases/download/{tag}/{name}"
+    if asset.get("browser_download_url") != url:
+        raise SystemExit(f"{tag}: unexpected asset URL")
+    return match.group(1), digest[7:].lower(), url
+options = [verify(fetch("current"), "current")]
+try:
+    options.append(verify(fetch("macos-current"), "macos-current"))
+except urllib.error.HTTPError as exc:
+    if exc.code != 404: raise
+latest, digest, url = max(options, key=lambda item: parts(item[0]))
+print("\t".join((latest, "yes" if parts(latest) > parts(installed) else "no", digest, url)))
 PY
 )"
 IFS=$'\t' read -r latest newer digest url <<<"$info"

@@ -14,6 +14,14 @@ on:
           - release
           - build
           - validate
+          - agent-ubuntu
+          - agent-macos
+          - agent-windows
+      agent_version:
+        description: 'Only for agent-* releases: next version, e.g. 0.7.8+68'
+        type: string
+        required: false
+        default: ''
   pull_request:
     branches: [main]
     paths:
@@ -44,7 +52,7 @@ concurrency:
 
 jobs:
   validate:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.task != 'agent-ubuntu' && inputs.task != 'agent-macos' && inputs.task != 'agent-windows') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -62,6 +70,8 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+[0-9]+$ ]] || {
             echo 'Invalid VERSION.' >&2; exit 1;
           }
+          # Refuse a future full release that would downgrade any platform-only agent.
+          python3 bin/4-guard-release-sync.py
           if gh release view "v$version" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "v$version already published. Increment VERSION before rebuilding." >&2
             exit 1
@@ -92,6 +102,7 @@ jobs:
           python3 -m py_compile desktop/ubuntu/taptether_tray.py desktop/ubuntu/taptether_screen.py bin/6-tt-generate-altstore.py bin/9-tt-brand-icons.py bin/4-test-deb-packaging.py
           python3 bin/4-check-release-pipeline.py
           python3 bin/4-test-deb-packaging.py
+          python3 bin/4-test-agent-release-feeds.py
           python3 bin/4-test-macos-uninstall.py
           python3 bin/4-test-macos-input-core.py
       - name: Go agent tests and vet
@@ -368,6 +379,141 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash bin/6-tt-publish-latest.sh
+
+  agent-only-validate:
+    # A separate lightweight path in the SAME workflow. Does not initialize
+    # Flutter, sign iOS code, or build Android; full releases remain untouched.
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.task == 'agent-ubuntu' || inputs.task == 'agent-macos' || inputs.task == 'agent-windows') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require main and explicit agent-only version
+        env:
+          REQUESTED_VERSION: ${{ inputs.agent_version }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]] || { echo 'Agent releases only from main.' >&2; exit 1; }
+          [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+[0-9]+$ ]] || {
+            echo 'Set agent_version to a valid new version such as 0.7.8+68.' >&2
+            exit 1
+          }
+      - name: Agent-only release guards
+        run: |
+          set -euo pipefail
+          for script in bin/*.sh; do bash -n "$script"; done
+          python3 -m py_compile bin/7b-tt-ubuntu-release-info.py desktop/ubuntu/taptether_tray.py
+          python3 bin/4-test-agent-release-feeds.py
+          python3 bin/4-test-deb-packaging.py
+          python3 bin/4-check-release-pipeline.py
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Test agent core
+        run: cd agent && go test ./... && go vet ./...
+
+  agent-only-ubuntu:
+    needs: agent-only-validate
+    if: ${{ inputs.task == 'agent-ubuntu' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Set package-only version without committing VERSION
+        env:
+          REQUESTED_VERSION: ${{ inputs.agent_version }}
+        run: printf '%s\n' "$REQUESTED_VERSION" > VERSION
+      - name: Build and verify Ubuntu installers
+        run: |
+          bash bin/2b-tt-ubuntu.sh
+          python3 bin/4-validate-desktop-installers.py --platform ubuntu
+          for deb in dist/ubuntu/*.deb; do dpkg-deb --info "$deb"; done
+      - name: Publish only Ubuntu agents
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash bin/6-tt-publish-agent-only.sh ubuntu
+
+  agent-only-windows:
+    needs: agent-only-validate
+    if: ${{ inputs.task == 'agent-windows' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Install icon renderer
+        run: python3 -m pip install --disable-pip-version-check Pillow
+      - name: Set package-only version without committing VERSION
+        env:
+          REQUESTED_VERSION: ${{ inputs.agent_version }}
+        run: printf '%s\n' "$REQUESTED_VERSION" > VERSION
+      - name: Verify Windows PowerShell scripts
+        shell: pwsh
+        run: |
+          foreach ($file in (Get-ChildItem desktop/windows -Filter '*.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw "Invalid PowerShell: $($file.Name)" }
+          }
+      - name: Build Windows agents
+        run: bash bin/2c-tt-windows.sh
+      - name: Publish only Windows agents
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash bin/6-tt-publish-agent-only.sh windows
+
+  agent-only-macos:
+    needs: agent-only-validate
+    if: ${{ inputs.task == 'agent-macos' }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: false
+      - name: Install icon renderer
+        run: python3 -m pip install --disable-pip-version-check Pillow
+      - name: Set package-only version without committing VERSION
+        env:
+          REQUESTED_VERSION: ${{ inputs.agent_version }}
+        run: printf '%s\n' "$REQUESTED_VERSION" > VERSION
+      - name: Validate native macOS tray and render branding
+        run: |
+          xcrun swiftc -typecheck desktop/macos/TapTetherTray.swift
+          python3 bin/9-tt-brand-icons.py --verify
+          python3 bin/9-tt-brand-icons.py
+      - name: Build and validate macOS agents
+        run: |
+          bash bin/2b-tt-macos.sh
+          python3 bin/4-validate-desktop-installers.py --platform macos
+      - name: Publish only macOS agents; never replace Screen/Input Core
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash bin/6-tt-publish-agent-only.sh macos
 
   cleanup-history:
     needs: build-and-publish

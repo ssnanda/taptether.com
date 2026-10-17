@@ -15,28 +15,56 @@ switch ($architecture.ToLowerInvariant()) {
 }
 $assetName = 'TapTetherAgent-Windows-' + $arch + '.zip'
 $repo = 'ssnanda/taptether.com'
-$release = Invoke-RestMethod -Uri ('https://api.github.com/repos/' + $repo + '/releases/tags/current') -TimeoutSec 20 -Headers @{ 'User-Agent'='TapTether-Windows-Updater'; 'Accept'='application/vnd.github+json' }
-if ($release.name -notmatch '(\d+\.\d+\.\d+\+\d+)') {throw 'Release metadata has no version.'}
-$latest = $Matches[1]
 $installed = if (Test-Path $currentVersionFile) { (Get-Content $currentVersionFile -Raw).Trim() } else { '0.0.0+0' }
 function VersionParts([string]$value) {
-    if ($value -notmatch '^(\d+)\.(\d+)\.(\d+)\+(\d+)$') {throw 'Invalid version.'}
+    if ($value -cnotmatch '^(\d+)\.(\d+)\.(\d+)\+(\d+)$') {throw 'Invalid agent version.'}
     return @([int]$Matches[1],[int]$Matches[2],[int]$Matches[3],[int]$Matches[4])
 }
-$existing = VersionParts $installed
-$desired = VersionParts $latest
-$isNewer = $false
-for ($i=0; $i -lt 4; $i++) {
-    if ($desired[$i] -gt $existing[$i]) { $isNewer=$true; break }
-    if ($desired[$i] -lt $existing[$i]) { break }
+function CompareVersions([string]$a, [string]$b) {
+    $left = VersionParts $a
+    $right = VersionParts $b
+    for ($i=0; $i -lt 4; $i++) {
+        if ($left[$i] -gt $right[$i]) {return 1}
+        if ($left[$i] -lt $right[$i]) {return -1}
+    }
+    return 0
 }
-if (!$isNewer) { exit 0 }
-$asset = @($release.assets | Where-Object { $_.name -ceq $assetName })
-if ($asset.Count -ne 1) {throw 'Matching Windows asset not found.'}
-if ($asset[0].digest -notmatch '^sha256:([a-fA-F0-9]{64})$') {throw 'SHA-256 digest missing.'}
-$expected = $Matches[1].ToUpperInvariant()
-$url = 'https://github.com/' + $repo + '/releases/download/current/' + $assetName
-if ($asset[0].browser_download_url -cne $url) {throw 'Unexpected release download URL.'}
+function ValidatedRelease([string]$tag) {
+    $uri = 'https://api.github.com/repos/' + $repo + '/releases/tags/' + $tag
+    $release = Invoke-RestMethod -Uri $uri -TimeoutSec 20 -Headers @{ 'User-Agent'='TapTether-Windows-Updater'; 'Accept'='application/vnd.github+json' }
+    if ($release.tag_name -cne $tag) {throw 'GitHub release tag mismatch.'}
+    if ($release.name -cnotmatch '^TapTether(?: Windows)? (\d+\.\d+\.\d+\+\d+)(?:\s|$)') {
+        throw ('Invalid ' + $tag + ' release title.')
+    }
+    $version = $Matches[1]
+    $files = @($release.assets | Where-Object { $_.name -ceq $assetName })
+    if ($files.Count -ne 1) {throw ('Missing Windows asset in ' + $tag)}
+    if ($files[0].digest -cnotmatch '^sha256:([a-fA-F0-9]{64})$') {throw 'SHA-256 digest missing.'}
+    $digest = $Matches[1].ToUpperInvariant()
+    $url = 'https://github.com/' + $repo + '/releases/download/' + $tag + '/' + $assetName
+    if ($files[0].browser_download_url -cne $url) {throw 'Unexpected agent release URL.'}
+    return [pscustomobject]@{ Version=$version; Digest=$digest; Url=$url; Tag=$tag }
+}
+$candidates = [System.Collections.Generic.List[object]]::new()
+$candidates.Add((ValidatedRelease 'current'))
+try {
+    $candidates.Add((ValidatedRelease 'windows-current'))
+} catch {
+    # Only 404 is an optional missing rolling feed. Anything else is a
+    # validation/network error and must not cause an unverified fallback.
+    $response = $_.Exception.Response
+    if ($null -eq $response -or [int]$response.StatusCode -ne 404) {throw}
+}
+$selected = $candidates[0]
+foreach ($candidate in $candidates) {
+    if ((CompareVersions $candidate.Version $selected.Version) -gt 0) {
+        $selected = $candidate
+    }
+}
+if ((CompareVersions $selected.Version $installed) -le 0) {exit 0}
+$latest = $selected.Version
+$expected = $selected.Digest
+$url = $selected.Url
 $work = Join-Path $env:TEMP ('TapTetherUpdate-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 try {

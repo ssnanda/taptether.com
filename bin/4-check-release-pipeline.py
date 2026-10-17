@@ -16,7 +16,7 @@ stage = (ROOT / "bin" / "2e-tt-stage-mobile-agents.sh").read_text(encoding="utf-
 assert "workflow_dispatch:" in workflow
 assert "schedule:" in workflow
 assert "task:" in workflow
-assert all(f"- {mode}" in workflow for mode in ("release", "build", "validate"))
+assert all(f"- {mode}" in workflow for mode in ("release", "build", "validate", "agent-ubuntu", "agent-macos", "agent-windows"))
 assert "          - cleanup" not in workflow
 assert "  push:\n    branches: [main, fix/v0.6-remote-scan-mac-details]" in workflow, (
     "Main production releases and explicit branch-only Windows validation"
@@ -101,6 +101,12 @@ assert "expected_assets=(" in publisher
 assert "already published" in publisher
 assert "release-v0.6.2-request" not in workflow
 
+assert 'python3 bin/4-test-agent-release-feeds.py' in workflow
+assert 'python3 bin/4-guard-release-sync.py' in publisher
+assert "  agent-only-validate:" in workflow
+assert "  agent-only-ubuntu:" in workflow
+assert "  agent-only-macos:" in workflow
+assert "  agent-only-windows:" in workflow
 assert "  cleanup-history:" in workflow
 assert "    needs: build-and-publish" in workflow
 assert "always() && (github.event_name == 'schedule'" in workflow
@@ -280,6 +286,6 @@ assert "device.scanSubtitle" in scan_screen
 assert "Check a specific computer" in scan_screen
 
 
-print("PASS: one Actions workflow, auto Release on VERSION, three manual choices")
+print("PASS: one Actions workflow, auto full Release on VERSION and per-platform agent-only manual releases")
 print("PASS: validate -> Ubuntu/Windows/macOS agents -> IPA/APK -> publish")
 print("PASS: weekly cleanup and immutable version-tagged Latest releases")

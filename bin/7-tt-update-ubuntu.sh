@@ -10,30 +10,7 @@ case "$arch" in amd64|arm64) ;; *) echo "Unsupported architecture: $arch" >&2; e
 current="$(dpkg-query -W taptether-agent 2>/dev/null | awk '{print $2}')"
 current="${current:-0.0.0+0}"
 asset="TapTetherAgent-Ubuntu-$arch.deb"
-info="$(python3 - "$arch" "$current" <<'PY'
-import json, re, sys, urllib.request
-arch, installed = sys.argv[1:]
-req = urllib.request.Request('https://api.github.com/repos/ssnanda/taptether.com/releases/tags/current',
-    headers={'Accept':'application/vnd.github+json','User-Agent':'TapTether-Ubuntu-Updater'})
-with urllib.request.urlopen(req, timeout=12) as response: data=json.load(response)
-match=re.search(r'(\d+\.\d+\.\d+\+\d+)', data.get('name',''))
-if not match: raise SystemExit('Release version unavailable; refusing upgrade.')
-latest=match.group(1)
-def parse(s):
-    m=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)\+(\d+)',s)
-    if not m: raise SystemExit('Cannot compare versions: '+s)
-    return tuple(map(int,m.groups()))
-asset=next((a for a in data.get('assets',[]) if a.get('name')=='TapTetherAgent-Ubuntu-'+arch+'.deb'),None)
-if not asset: raise SystemExit('Release missing required Ubuntu installer.')
-digest=asset.get('digest','')
-if not re.fullmatch('sha256:[0-9a-f]{64}',digest):
-    raise SystemExit('GitHub asset SHA-256 digest absent: refusing upgrade.')
-url=asset.get('browser_download_url','')
-expected=f'https://github.com/ssnanda/taptether.com/releases/download/current/TapTetherAgent-Ubuntu-{arch}.deb'
-if url!=expected: raise SystemExit('Unexpected release URL: refusing download.')
-print('\t'.join([latest,'yes' if parse(latest)>parse(installed) else 'no',digest[7:],url]))
-PY
-)"
+info="$(python3 /usr/share/taptether/7b-tt-ubuntu-release-info.py "$arch" "$current")"
 IFS=$'\t' read -r latest newer digest url <<<"$info"
 printf 'TapTether Ubuntu installed: %s | latest published: %s\n' "$current" "$latest"
 if [[ "$newer" != yes ]]; then echo 'Already up to date.'; exit 0; fi
