@@ -1,0 +1,36 @@
+{
+  "name": "TapTether",
+  "identifier": "com.taptether.altstore",
+  "sourceURL": "https://raw.githubusercontent.com/ssnanda/taptether.com/main/altstore.json",
+  "website": "https://taptether.com",
+  "apps": [
+    {
+      "name": "TapTether",
+      "bundleIdentifier": "com.taptether.taptether",
+      "developerName": "TapTether",
+      "subtitle": "Your devices. Your control. Your network.",
+      "localizedDescription": "A privacy-first local-network keyboard, trackpad and system volume remote for your own devices.",
+      "iconURL": "https://github.com/ssnanda/taptether.com/releases/download/current/TapTether-icon.png",
+      "tintColor": "173A3C",
+      "screenshotURLs": [],
+      "version": "0.8.9",
+      "buildVersion": "128",
+      "versionDate": "2026-10-23",
+      "versionDescription": "TapTether 0.8.9+128: current iPhone build",
+      "downloadURL": "https://github.com/ssnanda/taptether.com/releases/download/current/TapTether.ipa",
+      "size": 29596866,
+      "versions": [
+        {
+          "version": "0.8.9",
+          "buildVersion": "128",
+          "date": "2026-10-23",
+          "localizedDescription": "TapTether 0.8.9+128: current iPhone build",
+          "downloadURL": "https://github.com/ssnanda/taptether.com/releases/download/current/TapTether.ipa",
+          "size": 29596866,
+          "minOSVersion": "15.0"
+        }
+      ]
+    }
+  ],
+  "news": []
+}
