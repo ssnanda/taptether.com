@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "tag": "current",
+  "platforms": {
+    "darwin": {
+      "version": "0.8.48+209",
+      "assets": {
+        "TapTetherAgent-macOS-amd64.tar.gz": "sha256:ea3f9a891a30f3e7415d7858bb4d50ab319ca3d4b032a3492d8029b86b5105f1",
+        "TapTetherAgent-macOS-arm64.tar.gz": "sha256:0bd8d4f27df4faca63a815dd8297107e45463cabf310fc821bcaae36b2112c10"
+      }
+    },
+    "linux": {
+      "version": "0.8.48+209",
+      "assets": {
+        "TapTetherAgent-Ubuntu-amd64.deb": "sha256:3b5a577cb95fa84477ddc3b6c4ee9a8d128d8a1c715b4ba4443cec1c6182e518",
+        "TapTetherAgent-Ubuntu-arm64.deb": "sha256:d896a73cf6eaf1056c9b0ae04ea69388bce9d0d1b7757cb65ae6ec8756acfbbe"
+      }
+    },
+    "windows": {
+      "version": "0.8.48+209",
+      "assets": {
+        "TapTetherAgent-Windows-amd64.zip": "sha256:834ea75061e1c3b6b7816ae314be8f452312bb3fcd4d9b9f2f28209da62e081c",
+        "TapTetherAgent-Windows-arm64.zip": "sha256:9daefb08d63dc4ada4510d9843c6d8d18ea6d601b345d90d9fcd945f139d74e3"
+      }
+    }
+  }
+}
